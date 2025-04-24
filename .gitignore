@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+ENV/
+env/
+.venv/
+
+# VS Code settings
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Windows batch script output (if you redirect logs)
+*.log
+
+# Cache or temp files
+*.tmp
+*.bak
+*.swp
+
+# Python egg metadata
+*.egg-info/
+.eggs/
