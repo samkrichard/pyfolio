@@ -2,167 +2,235 @@ from pycoingecko import CoinGeckoAPI
 import json
 import os
 
+# --- Config ---
 PROGRAM_TITLE = 'pyfolio'
-VERSION = 'v1.0.0'
+VERSION = 'v1.1.0'
 
 DEFAULT_CURRENCY = 'cad'
-
 COLUMN_WIDTH = 22
-WIDTH = 5 * COLUMN_WIDTH + 16
+NUM_COLUMNS = 5  # Coin, Total, Price, Value, % of Total
+WIDTH = NUM_COLUMNS * COLUMN_WIDTH + 16  # Full table width
 
-# Note: Optimal terminal window width specified in the batch file is given by: 5 * COLUMN_WIDTH + 18
 
 def load_json_file(path, fallback):
-
+    """
+    Load and parse a JSON file.
+    If the file does not exist or fails to parse, return the provided fallback value.
+    """
     if not os.path.exists(path):
         print(f' Error: \'{path}\' not found.')
         return fallback
-    
-    with open(path, 'r') as f:
-        try:
+
+    try:
+        with open(path, 'r') as f:
             return json.load(f)
-        
-        except json.JSONDecodeError:
-            print(f' Error: Failed to parse \'{path}\'.')
-            return fallback
+    except json.JSONDecodeError:
+        print(f' Error: Failed to parse \'{path}\'.')
+        return fallback
+
 
 def calculate_values(coingeckoapi, currency, portfolio):
+    """
+    Fetch the latest prices for all coins in the portfolio, calculate individual values and
+    their percentage of the total portfolio.
+    Returns a dictionary structure or None if API call fails or total value is zero.
+    """
+    try:
+        prices = coingeckoapi.get_price(list(portfolio.keys()), currency)
+    except Exception as e:
+        print(f' Error fetching price data: {e}')
+        return None
 
-    prices = coingeckoapi.get_price(list(portfolio.keys()), currency)
-    values = {
-        'currency': currency,
-        'total' : 0
-        }
-    
-    for coin in portfolio.keys():
-        values[coin] = [prices[coin][currency], prices[coin][currency] * portfolio[coin]] 
-        values['total'] += values[coin][1]
-        
-    for coin in portfolio.keys(): 
+    values = {'currency': currency, 'total': 0}
+
+    for coin in portfolio:
+        if coin not in prices or currency not in prices[coin]:
+            print(f' Warning: No pricing data found for "{coin}" in {currency.upper()}')
+            continue
+        price = prices[coin][currency]
+        value = price * portfolio[coin]
+        values[coin] = [price, value]
+        values['total'] += value
+
+    if values['total'] == 0:
+        print(' Error: Total value is zero. Check portfolio or currency.')
+        return None
+
+    # Add percentage share for each coin
+    for coin in values:
+        if coin not in portfolio:
+            continue
         values[coin].append(100 * values[coin][1] / values['total'])
 
     return values
 
-def make_table(values, portfolio):
 
+def make_table(values, portfolio):
+    """
+    Generate a 2D list representing the table structure for terminal output.
+    Each row corresponds to a coin with relevant info formatted to COLUMN_WIDTH.
+    """
     headers = (
         'Coin',
         'Total',
         f'Price ({values["currency"].upper()})',
         f'Value ({values["currency"].upper()})',
         '% of Total Value'
-        )
-    
-    table = [['{:<{}}'.format(header, COLUMN_WIDTH) for header in headers],]
+    )
 
-    for coin in portfolio.keys():
+    table = [['{:<{}}'.format(header, COLUMN_WIDTH) for header in headers]]
+
+    for coin in portfolio:
+        if coin not in values:
+            continue
         table.append([
-            '{:<{}}'.format(entree, COLUMN_WIDTH) for entree in [
+            '{:<{}}'.format(entry, COLUMN_WIDTH) for entry in [
                 coin.replace('-', ' ').title(),
                 portfolio[coin],
                 '{:<.8f}'.format(values[coin][0]),
                 '{:<.8f}'.format(values[coin][1]),
                 '{:2.2f}'.format(values[coin][2]) + ' %'
-                ]
-            ])
-
+            ]
+        ])
     return table
 
+
 def display_portfolio(coingeckoapi, currency, portfolio):
+    """
+    Calculate and display the user's portfolio in a formatted table.
+    """
     values = calculate_values(coingeckoapi, currency, portfolio)
+    if not values:
+        return
+
     table = make_table(values, portfolio)
-    
+
     for i in range(len(table) + 3):
         if not (i % (len(table) + 2)) or i == 2:
-            print(f' {"="*WIDTH}')
+            print(f' {"=" * WIDTH}')
         else:
-            print(f' | {" | ".join(["{:<{}}".format(entree, COLUMN_WIDTH) for entree in table[i - 2 + (i < 2)]])} |')
-            
-    print(' |' + '{:^{}}'.format(f'Total Value ({currency.upper()}): {"{:.2f}".format(values["total"])}', (WIDTH - 2)) + '|')
-    print(f' {"="*WIDTH}')
+            print(f' | {" | ".join(["{:<{}}".format(entry, COLUMN_WIDTH) for entry in table[i - 2 + (i < 2)]])} |')
+
+    decimals = "{:.2f}" if currency in ("usd", "cad") else "{:.8f}"
+    print(' |' + '{:^{}}'.format(f'Total Value ({currency.upper()}): {decimals.format(values["total"])}', WIDTH - 2) + '|')
+    print(f' {"=" * WIDTH}')
+
 
 def display_title():
+    """
+    Display the program title and version centered.
+    """
     for i in range(3):
-        print((f' {"="*WIDTH}', f' |{"{:^{}}".format(PROGRAM_TITLE + " " + VERSION, WIDTH - 2)}|')[i%2])
-    
+        print((f' {"=" * WIDTH}', f' |{"{:^{}}".format(PROGRAM_TITLE + " " + VERSION, WIDTH - 2)}|')[i % 2])
+
+
 def display_help():
+    """
+    Show help instructions for all supported commands.
+    """
     print("""
  Press Enter to refresh prices.
 
  Portfolio information must be manually entered into the program's source file.
- 
- Note: When checking against bitcoin, the id must be entered as 'btc'. When Checking the price of
+
+ Note: When checking against bitcoin, the id must be entered as 'btc'. When checking the price of
        bitcoin, use 'bitcoin'.
 
  Commands:
 
   'help':
       - Display this help screen.
-
       - Aliases: '?', 'h'
-     
+
   'currency':
       - Change the currently selected currency.
-      
       - Alias: 'c'
 
   'price':
       - Check the price of a cryptocurrency against fiat or bitcoin.
-      
       - Alias: 'p'
 
   'all-in':
       - Calculate the total amount of a cryptocurrency acquired from converting the entire
         portfolio into it.
-        
-      - Aliases: 'allin', 'a-i', 'ai', 'a' 
-     
+      - Aliases: 'allin', 'a-i', 'ai'
+
   'exit':
       - Terminate the program.
-      
-      - Alias: 'e'""")
+      - Alias: 'e'
+    """)
+
+
+def get_clean_input():
+    """
+    Get clean, lowercased, split user input.
+    """
+    return input('\n >> ').strip().lower().split()
+
 
 def get_user_input(coingeckoapi, currency, portfolio):
-    cmd = input('\n >> ').lower().split()
+    """
+    Handle user input and execute corresponding actions.
+    """
+    cmd = get_clean_input()
     print()
 
-    if len(cmd) == 0:
-        display_portfolio(coingeckoapi, currency, portfolio)            
+    if not cmd:
+        display_portfolio(coingeckoapi, currency, portfolio)
+        return True, currency
 
-    elif cmd[0] in ('e', 'exit'):
+    if cmd[0] in ('e', 'exit'):
         print(' Goodbye!\n')
-        return False
+        return False, currency
 
     elif cmd[0] in ('?', 'help', 'h'):
         display_title()
         display_help()
 
     elif cmd[0] in ('currency', 'c'):
-        currency = cmd[1]
-        display_portfolio(coingeckoapi, currency, portfolio)
+        if len(cmd) < 2:
+            print(" Error: Missing currency argument.")
+        else:
+            currency = cmd[1]
+            display_portfolio(coingeckoapi, currency, portfolio)
 
     elif cmd[0] in ('price', 'p'):
-        if len(cmd) > 2:
-            prices = coingeckoapi.get_price(cmd[1], cmd[2])
-        else:
-            prices = coingeckoapi.get_price(cmd[1], currency)
-            cmd.append(currency)
+        if len(cmd) < 2:
+            print(" Error: Specify a coin name.")
+            return True, currency
 
-        print(f' {cmd[1].replace("-", " ").title()} price: {prices[cmd[1]][cmd[2]]} {cmd[2].upper()}')
+        coin = cmd[1]
+        target_currency = cmd[2] if len(cmd) > 2 else currency
 
-    elif cmd[0] in ('all-in', 'allin', 'a-i', 'ai', 'a'):
+        try:
+            prices = coingeckoapi.get_price(coin, target_currency)
+            print(f' {coin.replace("-", " ").title()} price: {prices[coin][target_currency]} {target_currency.upper()}')
+        except Exception as e:
+            print(f' Error fetching price for {coin}: {e}')
+
+    elif cmd[0] in ('all-in', 'allin', 'a-i', 'ai'):
+        if len(cmd) < 2:
+            print(" Error: Specify a target coin.")
+            return True, currency
+
         values = calculate_values(coingeckoapi, currency, portfolio)
-        
-        if cmd[1].lower() in portfolio.keys():   
-            difference = (values['total'] - values[cmd[1]][1]) / values[cmd[1]][0]
-            total = portfolio[cmd[1]] + difference
-            
-        else:
-            difference = values['total'] / coingeckoapi.get_price(cmd[1], currency)[cmd[1]][currency]
-            total = difference
+        if not values:
+            return True, currency
 
-        print(f' Total {cmd[1].replace("-", " ").title()}: {total} (+ {difference})')
-        
+        target = cmd[1]
+        try:
+            if target in values:
+                difference = (values['total'] - values[target][1]) / values[target][0]
+                total = portfolio[target] + difference
+            else:
+                target_price = coingeckoapi.get_price(target, currency)[target][currency]
+                difference = values['total'] / target_price
+                total = difference
+
+            print(f' Total {target.replace("-", " ").title()}: {total} (+ {difference})')
+        except Exception as e:
+            print(f' Error calculating all-in conversion: {e}')
+
     else:
         print(' Error: Unknown command.')
 
@@ -170,27 +238,26 @@ def get_user_input(coingeckoapi, currency, portfolio):
 
 
 def main():
+    """
+    Main program loop: load config/portfolio, display welcome screen, run command loop.
+    """
     coingeckoapi = CoinGeckoAPI()
     config = load_json_file('config.json', {})
-
-    if 'default_currency' in config:
-        currency = config['default_currency']
-    else:
-        currency = 'cad'
+    currency = config.get('default_currency', DEFAULT_CURRENCY)
 
     portfolio = load_json_file('portfolio.json', {})
+    if not portfolio:
+        print(' Warning: Portfolio is empty.')
 
     display_title()
     print('\n Welcome!\n')
-
     display_portfolio(coingeckoapi, currency, portfolio)
 
-    running = True
-
     print('\n Press Enter to refresh or type \'?\' for help.')
-    while (running):
+    running = True
+    while running:
         running, currency = get_user_input(coingeckoapi, currency, portfolio)
-        
+
 
 if __name__ == '__main__':
     main()
